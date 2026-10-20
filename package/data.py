@@ -438,3 +438,50 @@ def dashboard_counts(documents: list[dict], reviews: dict, today: str) -> dict:
         "waiting_documents": waiting_documents,
         "finished_today": finished_today,
     }
+
+
+_STATUS_RANK = {"new": 0, "progress": 1, "done": 2, "empty": 3}
+
+
+def _parse_review_date(value: str) -> datetime:
+    try:
+        return datetime.strptime(value, "%d.%m.%Y")
+    except ValueError:
+        return datetime.min
+
+
+def sort_value(document: dict, review: dict, column: str):
+    """A value that orders one table column: text, date, or number."""
+    if column == "text_type":
+        return document["text_type"]
+    if column == "unit":
+        return document["unit"]
+    if column == "date":
+        return _parse_review_date(document["date"])
+    if column == "model":
+        return document["model"].casefold()
+    if column == "words":
+        return document["word_count"]
+    if column == "errors":
+        return len(document["errors"])
+    if column == "status":
+        view = status_view(document, review)
+        return (_STATUS_RANK[view["kind"]], view["judged"], view["total"])
+    raise ValueError(f"Unknown sort column: {column}")
+
+
+def sort_documents(
+    documents: list[dict],
+    reviews: dict,
+    column: str | None,
+    descending: bool = False,
+) -> list[dict]:
+    if not column:
+        return list(documents)
+    return sorted(
+        documents,
+        key=lambda document: sort_value(
+            document, reviews.get(document["id"]) or blank_review(), column
+        ),
+        reverse=descending,
+    )

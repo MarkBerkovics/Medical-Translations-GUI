@@ -54,6 +54,21 @@ html, body, .stApp, [data-testid="stAppViewContainer"], [data-testid="stHeader"]
   background: #ffffff;
   border-left: 1px solid #e6edf2;
 }
+/* The page is right-to-left, so Streamlit's collapse slide leaves a sliver of the menu. */
+[data-testid="stSidebar"][data-collapsed="true"] {
+  width: 0 !important;
+  min-width: 0 !important;
+  max-width: 0 !important;
+  transform: none !important;
+  border: none !important;
+  box-shadow: none !important;
+  overflow: hidden !important;
+  padding: 0 !important;
+}
+[data-testid="stSidebar"][data-collapsed="true"] [data-testid="stSidebarContent"],
+[data-testid="stSidebar"][data-collapsed="true"] [data-testid="stSidebarResizeHandle"] {
+  display: none !important;
+}
 [data-testid="stMainBlockContainer"], .block-container {
   max-width: 1440px;
   padding-top: 1.1rem;
@@ -175,6 +190,22 @@ hr.row-sep { margin: 0.1rem 0; border: none; border-top: 1px solid #eef2f6; }
 }
 [class*="st-key-open-"] button p,
 [class*="st-key-unit-"] button p { white-space: normal !important; font-size: 0.98rem !important; }
+[class*="st-key-sort-"] button {
+  background: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+  font-weight: 650 !important;
+  font-size: 0.82rem !important;
+  justify-content: flex-start !important;
+  text-align: right !important;
+  padding: 0.1rem 0.15rem !important;
+  min-height: 0 !important;
+}
+[class*="st-key-sort-"] button[kind="secondary"] { color: #64748b !important; }
+[class*="st-key-sort-"] button[kind="primary"] {
+  color: #0f766e !important;
+  background: transparent !important;
+}
 [class*="st-key-no-"] button[kind="primary"] {
   background-color: #be123c !important;
   border-color: #be123c !important;
@@ -813,22 +844,40 @@ def render_add_form(document: dict, meta: dict) -> None:
         st.rerun()
 
 
-def listed_documents(documents: list[dict]) -> list[dict]:
-    unit = st.session_state.get("filter_unit", "all")
-    model = st.session_state.get("filter_model", "all")
-    query = str(st.session_state.get("filter_query") or "").strip()
-    visible = [
+def current_filters() -> tuple[str, str, str, str]:
+    return (
+        st.session_state.get("filter_text_type", "all"),
+        st.session_state.get("filter_unit", "all"),
+        st.session_state.get("filter_model", "all"),
+        str(st.session_state.get("filter_query") or "").strip(),
+    )
+
+
+def visible_documents(documents: list[dict], reviews: dict) -> list[dict]:
+    text_type, unit, model, query = current_filters()
+    matched = [
         document
         for document in documents
-        if document_matches(document, unit, model, query)
+        if document_matches(document, text_type, unit, model, query)
     ]
-    return visible or list(documents)
+    return data.sort_documents(
+        matched,
+        reviews,
+        st.session_state.get("sort_column"),
+        bool(st.session_state.get("sort_descending")),
+    )
 
 
 def render_document_nav(document: dict, documents: list[dict]) -> None:
-    visible = listed_documents(documents)
+    reviews = data.load_reviews()
+    visible = visible_documents(documents, reviews)
     if document["id"] not in {item["id"] for item in visible}:
-        visible = list(documents)
+        visible = data.sort_documents(
+            documents,
+            reviews,
+            st.session_state.get("sort_column"),
+            bool(st.session_state.get("sort_descending")),
+        )
     index = next(i for i, item in enumerate(visible) if item["id"] == document["id"])
     previous_id = visible[index - 1]["id"] if index > 0 else None
     next_id = visible[index + 1]["id"] if index + 1 < len(visible) else None
@@ -976,32 +1025,43 @@ def render_kpis(documents: list[dict], reviews: dict) -> None:
             )
 
 
-def render_filters(documents: list[dict]) -> tuple[str, str, str]:
+def render_filters(documents: list[dict]) -> tuple[str, str, str, str]:
+    text_types = sorted({document["text_type"] for document in documents})
     units = sorted({document["unit"] for document in documents})
     models = sorted({document["model"] for document in documents})
-    filters = st.columns([1, 1, 1.6], vertical_alignment="bottom")
-    unit = filters[0].selectbox(
-        "יחידה",
+    filters = st.columns([1.35, 1, 1, 1.35], vertical_alignment="bottom")
+    text_type = filters[0].selectbox(
+        "סוג הטקסט",
+        options=["all", *text_types],
+        format_func=lambda value: "כל הסוגים" if value == "all" else value,
+        key="filter_text_type",
+    )
+    unit = filters[1].selectbox(
+        "מחלקה",
         options=["all", *units],
-        format_func=lambda value: "כל היחידות" if value == "all" else value,
+        format_func=lambda value: "כל המחלקות" if value == "all" else value,
         key="filter_unit",
     )
-    model = filters[1].selectbox(
+    model = filters[2].selectbox(
         "מודל",
         options=["all", *models],
         format_func=lambda value: "כל המודלים" if value == "all" else value,
         key="filter_model",
     )
-    query = filters[2].text_input(
+    query = filters[3].text_input(
         "חיפוש",
-        placeholder="חיפוש לפי סוג הטקסט, יחידה או מילים מהמקור",
+        placeholder="חיפוש לפי סוג הטקסט, מחלקה או מילים מהמקור",
         icon=":material/search:",
         key="filter_query",
     )
-    return unit, model, (query or "").strip()
+    return text_type, unit, model, (query or "").strip()
 
 
-def document_matches(document: dict, unit: str, model: str, query: str) -> bool:
+def document_matches(
+    document: dict, text_type: str, unit: str, model: str, query: str
+) -> bool:
+    if text_type != "all" and document["text_type"] != text_type:
+        return False
     if unit != "all" and document["unit"] != unit:
         return False
     if model != "all" and document["model"] != model:
@@ -1067,6 +1127,34 @@ def render_document_row(document: dict, review: dict) -> None:
     st.markdown("<hr class='row-sep'/>", unsafe_allow_html=True)
 
 
+SORT_COLUMNS = (
+    ("text_type", "סוג הטקסט"),
+    ("unit", "מחלקה"),
+    ("date", "תאריך"),
+    ("model", "מודל"),
+    ("words", "מילים"),
+    ("errors", "ממצאים"),
+    ("status", "סטטוס"),
+)
+
+
+def toggle_sort(column: str) -> None:
+    if st.session_state.get("sort_column") == column:
+        st.session_state["sort_descending"] = not bool(
+            st.session_state.get("sort_descending")
+        )
+        return
+    st.session_state["sort_column"] = column
+    st.session_state["sort_descending"] = False
+
+
+def sort_header_label(column: str, title: str) -> str:
+    if st.session_state.get("sort_column") != column:
+        return title
+    arrow = "↓" if st.session_state.get("sort_descending") else "↑"
+    return f"{title} {arrow}"
+
+
 def render_list(documents: list[dict], reviews: dict) -> None:
     st.markdown(
         """
@@ -1078,23 +1166,27 @@ def render_list(documents: list[dict], reviews: dict) -> None:
         unsafe_allow_html=True,
     )
     render_kpis(documents, reviews)
-    unit, model, query = render_filters(documents)
-    visible = [
-        document
-        for document in documents
-        if document_matches(document, unit, model, query)
-    ]
+    render_filters(documents)
+    visible = visible_documents(documents, reviews)
     st.caption(
-        f"מציג {len(visible)} מתוך {len(documents)} · לחצו על סוג הטקסט או על המחלקה כדי לפתוח"
+        "מציג "
+        f"{len(visible)} מתוך {len(documents)} · "
+        "לחצו על כותרת כדי למיין, ועל סוג הטקסט או המחלקה כדי לפתוח"
     )
 
     with st.container(border=True):
         header = st.columns(LIST_WIDTHS, vertical_alignment="center")
-        for column, title in zip(
-            header,
-            ["סוג הטקסט", "מחלקה", "תאריך", "מודל", "מילים", "ממצאים", "סטטוס"],
-        ):
-            column.markdown(f"<div class='th'>{title}</div>", unsafe_allow_html=True)
+        for column, (sort_key, title) in zip(header, SORT_COLUMNS):
+            column.button(
+                sort_header_label(sort_key, title),
+                key=f"sort-{sort_key}",
+                type="primary"
+                if st.session_state.get("sort_column") == sort_key
+                else "secondary",
+                on_click=toggle_sort,
+                args=(sort_key,),
+                width="stretch",
+            )
         st.markdown("<hr class='row-sep'/>", unsafe_allow_html=True)
         if not visible:
             st.info("אין מסמכים שתואמים לסינון.")
