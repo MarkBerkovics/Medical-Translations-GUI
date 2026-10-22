@@ -205,6 +205,7 @@ def load_documents(path: Path = EXCEL_PATH) -> list[dict]:
         date = clean_text(row["Date"])
         unit = clean_text(row["Unit"])
         text_type = clean_text(row["Text_type"])
+        experiment = clean_text(row["Experiment"])
         documents.append(
             {
                 "id": f"{date}|{unit}|{text_type}",
@@ -212,6 +213,7 @@ def load_documents(path: Path = EXCEL_PATH) -> list[dict]:
                 "date": date,
                 "unit": unit,
                 "text_type": text_type,
+                "experiment": experiment,
                 "label": f"{text_type} — {unit}",
                 "hebrew": clean_text(row["Text_Hebrew"]),
                 "english": clean_text(row["Text_English"]),
@@ -452,6 +454,8 @@ def _parse_review_date(value: str) -> datetime:
 
 def sort_value(document: dict, review: dict, column: str):
     """A value that orders one table column: text, date, or number."""
+    if column == "experiment":
+        return document["experiment"].casefold()
     if column == "text_type":
         return document["text_type"]
     if column == "unit":

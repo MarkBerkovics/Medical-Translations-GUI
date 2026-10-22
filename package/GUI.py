@@ -35,7 +35,7 @@ SEVERITY_COLOR = {
     "critical": ("#ffe4e6", "#e11d48"),
     None: ("#dcfce7", "#15803d"),
 }
-LIST_WIDTHS = [2.5, 1.35, 1.1, 1.4, 0.7, 0.7, 1.3]
+LIST_WIDTHS = [1.25, 2.15, 1.2, 1.05, 1.25, 0.65, 0.65, 1.2]
 
 
 APP_CSS = """
@@ -844,8 +844,9 @@ def render_add_form(document: dict, meta: dict) -> None:
         st.rerun()
 
 
-def current_filters() -> tuple[str, str, str, str]:
+def current_filters() -> tuple[str, str, str, str, str]:
     return (
+        st.session_state.get("filter_experiment", "all"),
         st.session_state.get("filter_text_type", "all"),
         st.session_state.get("filter_unit", "all"),
         st.session_state.get("filter_model", "all"),
@@ -854,11 +855,11 @@ def current_filters() -> tuple[str, str, str, str]:
 
 
 def visible_documents(documents: list[dict], reviews: dict) -> list[dict]:
-    text_type, unit, model, query = current_filters()
+    experiment, text_type, unit, model, query = current_filters()
     matched = [
         document
         for document in documents
-        if document_matches(document, text_type, unit, model, query)
+        if document_matches(document, experiment, text_type, unit, model, query)
     ]
     return data.sort_documents(
         matched,
@@ -1025,41 +1026,56 @@ def render_kpis(documents: list[dict], reviews: dict) -> None:
             )
 
 
-def render_filters(documents: list[dict]) -> tuple[str, str, str, str]:
+def render_filters(documents: list[dict]) -> tuple[str, str, str, str, str]:
+    experiments = sorted({document["experiment"] for document in documents})
     text_types = sorted({document["text_type"] for document in documents})
     units = sorted({document["unit"] for document in documents})
     models = sorted({document["model"] for document in documents})
-    filters = st.columns([1.35, 1, 1, 1.35], vertical_alignment="bottom")
-    text_type = filters[0].selectbox(
+    # The page is right-to-left, so the first column is the rightmost filter.
+    filters = st.columns([1.15, 1.25, 1, 1, 1.25], vertical_alignment="bottom")
+    experiment = filters[0].selectbox(
+        "Experiment",
+        options=["all", *experiments],
+        format_func=lambda value: "All experiments" if value == "all" else value,
+        key="filter_experiment",
+    )
+    text_type = filters[1].selectbox(
         "סוג הטקסט",
         options=["all", *text_types],
         format_func=lambda value: "כל הסוגים" if value == "all" else value,
         key="filter_text_type",
     )
-    unit = filters[1].selectbox(
+    unit = filters[2].selectbox(
         "מחלקה",
         options=["all", *units],
         format_func=lambda value: "כל המחלקות" if value == "all" else value,
         key="filter_unit",
     )
-    model = filters[2].selectbox(
+    model = filters[3].selectbox(
         "מודל",
         options=["all", *models],
         format_func=lambda value: "כל המודלים" if value == "all" else value,
         key="filter_model",
     )
-    query = filters[3].text_input(
+    query = filters[4].text_input(
         "חיפוש",
         placeholder="חיפוש לפי סוג הטקסט, מחלקה או מילים מהמקור",
         icon=":material/search:",
         key="filter_query",
     )
-    return text_type, unit, model, (query or "").strip()
+    return experiment, text_type, unit, model, (query or "").strip()
 
 
 def document_matches(
-    document: dict, text_type: str, unit: str, model: str, query: str
+    document: dict,
+    experiment: str,
+    text_type: str,
+    unit: str,
+    model: str,
+    query: str,
 ) -> bool:
+    if experiment != "all" and document["experiment"] != experiment:
+        return False
     if text_type != "all" and document["text_type"] != text_type:
         return False
     if unit != "all" and document["unit"] != unit:
@@ -1071,6 +1087,7 @@ def document_matches(
     haystack = " ".join(
         [
             document["label"],
+            document["experiment"],
             document["unit"],
             document["text_type"],
             document["model"],
@@ -1087,7 +1104,11 @@ def render_document_row(document: dict, review: dict) -> None:
         document["severity"], SEVERITY_COLOR[None]
     )
     columns = st.columns(LIST_WIDTHS, vertical_alignment="center")
-    columns[0].button(
+    columns[0].markdown(
+        f"<div class='cell'>{escape(document['experiment'])}</div>",
+        unsafe_allow_html=True,
+    )
+    columns[1].button(
         document["text_type"],
         key=f"open-{widget_key(document['id'])}",
         type="tertiary",
@@ -1096,7 +1117,7 @@ def render_document_row(document: dict, review: dict) -> None:
         on_click=open_document,
         args=(document["id"],),
     )
-    columns[1].button(
+    columns[2].button(
         document["unit"],
         key=f"unit-{widget_key(document['id'])}",
         type="tertiary",
@@ -1105,22 +1126,22 @@ def render_document_row(document: dict, review: dict) -> None:
         on_click=open_document,
         args=(document["id"],),
     )
-    columns[2].markdown(
+    columns[3].markdown(
         f"<div class='cell'>{escape(document['date'])}</div>", unsafe_allow_html=True
     )
-    columns[3].markdown(
+    columns[4].markdown(
         f"<div class='cell'>{escape(document['model'])}</div>", unsafe_allow_html=True
     )
-    columns[4].markdown(
+    columns[5].markdown(
         f"<div class='cell-muted'>{document['word_count']}</div>",
         unsafe_allow_html=True,
     )
-    columns[5].markdown(
+    columns[6].markdown(
         f"<div class='count-pill' style='background:{background};color:{foreground}'>"
         f"{len(document['errors'])}</div>",
         unsafe_allow_html=True,
     )
-    columns[6].markdown(
+    columns[7].markdown(
         f"<span class='status status-{view['kind']}'>{escape(view['label'])}</span>",
         unsafe_allow_html=True,
     )
@@ -1128,6 +1149,7 @@ def render_document_row(document: dict, review: dict) -> None:
 
 
 SORT_COLUMNS = (
+    ("experiment", "Experiment"),
     ("text_type", "סוג הטקסט"),
     ("unit", "מחלקה"),
     ("date", "תאריך"),
